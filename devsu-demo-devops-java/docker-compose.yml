@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  devsu-demo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: devsu-demo-app
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      NAME_DB: jdbc:h2:file:./data/testdb
+      USERNAME_DB: user
+      PASSWORD_DB: password
+    volumes:
+      - h2-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s 
+
+volumes:
+  h2-data:
