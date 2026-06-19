@@ -7,7 +7,7 @@ on:
     branches: [ "main" ]
 
 env:
-  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/devsu-demo-java
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/devsu-demo-devops
   JAVA_VERSION: '17'
 
 jobs:
