@@ -33,11 +33,11 @@ jobs:
 
       # ── Construcción de código ──
       - name: Build with Maven
-        run: mvn clean compile -B
+        run: ./mvnw clean compile -B
 
       # ── Pruebas unitarias + Cobertura (JaCoCo) ──
       - name: Run Unit Tests & Generate Coverage Report
-        run: mvn test jacoco:report -B
+        run: ./mvnw test jacoco:report -B
 
       # ── Publicar resultados de tests ──
       - name: Publish Test Results
@@ -59,7 +59,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mvn sonar:sonar \
+          ./mvnw sonar:sonar \
             -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }} \
             -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }} \
             -Dsonar.host.url=https://sonarcloud.io \
