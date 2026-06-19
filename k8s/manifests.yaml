@@ -1,0 +1,85 @@
+# 1. Configuración de la base de datos y puertos
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: devsu-demo-config
+data:
+  NAME_DB: "jdbc:h2:file:/app/data/testdb"
+  PORT: "8000"
+
+---
+# 2. Almacenamiento persistente para H2
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: h2-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# 3. El Deployment de la aplicación
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devsu-demo-app
+spec:
+  replicas: 2 # Alta disponibilidad
+  selector:
+    matchLabels:
+      app: devsu-demo
+  template:
+    metadata:
+      labels:
+        app: devsu-demo
+    spec:
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+      - name: devsu-demo
+        image: ${{ secrets.DOCKERHUB_USERNAME }}/devsu-demo-java:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8000
+        envFrom:
+        - configMapRef:
+            name: devsu-demo-config
+        # Health Checks (Liveness y Readiness)
+        livenessProbe:
+          httpGet:
+            path: /api/actuator/health
+            port: 8000
+          initialDelaySeconds: 40
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/actuator/health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 5
+        volumeMounts:
+        - name: data-storage
+          mountPath: /app/data
+      volumes:
+      - name: data-storage
+        persistentVolumeClaim:
+          claimName: h2-pvc
+
+---
+# 4. Servicio para exponer la app (NodePort para Minikube)
+apiVersion: v1
+kind: Service
+metadata:
+  name: devsu-demo-service
+spec:
+  type: NodePort
+  selector:
+    app: devsu-demo
+  ports:
+  - port: 8000
+    targetPort: 8000
+    nodePort: 30080 # Acceso vía http://MINIKUBE_IP:30080
