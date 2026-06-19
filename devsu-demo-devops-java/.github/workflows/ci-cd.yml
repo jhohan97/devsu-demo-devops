@@ -1,0 +1,135 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/devsu-demo-java
+  JAVA_VERSION: '17'
+
+jobs:
+  # ─────────────────────────────────────────
+  # JOB 1: Build, Test, Coverage & Static Analysis
+  # ─────────────────────────────────────────
+  build-and-test:
+    name: Build, Test & Analyze
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Necesario para SonarCloud
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      # ── Construcción de código ──
+      - name: Build with Maven
+        run: mvn clean compile -B
+
+      # ── Pruebas unitarias + Cobertura (JaCoCo) ──
+      - name: Run Unit Tests & Generate Coverage Report
+        run: mvn test jacoco:report -B
+
+      # ── Publicar resultados de tests ──
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: target/surefire-reports/*.xml
+
+      # ── Publicar reporte de cobertura ──
+      - name: Upload Coverage Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage-report
+          path: target/site/jacoco/
+
+      # ── Análisis de código estático (SonarCloud) ──
+      - name: Static Code Analysis with SonarCloud
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mvn sonar:sonar \
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }} \
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }} \
+            -Dsonar.host.url=https://sonarcloud.io \
+            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
+            -B
+
+  # ─────────────────────────────────────────
+  # JOB 2: Docker Build, Scan & Push
+  # ─────────────────────────────────────────
+  docker-build-and-push:
+    name: Docker Build, Scan & Push
+    runs-on: ubuntu-latest
+    needs: build-and-test  # Solo corre si el job anterior pasó
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Metadata para el tag de la imagen ──
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      # ── Login a Docker Hub ──
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # ── Construir la imagen ──
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false  # Primero construimos sin subir para escanear
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          load: true   # Cargar en el daemon local para el escaneo
+
+      # ── Escaneo de vulnerabilidades (Trivy) ──
+      - name: Scan Docker image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE }}:latest
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'  # No falla el pipeline, solo reporta
+
+      # ── Publicar resultados del escaneo en GitHub Security ──
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+      # ── Subir imagen a Docker Hub ──
+      - name: Push Docker image to Docker Hub
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
