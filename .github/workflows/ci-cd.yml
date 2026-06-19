@@ -131,34 +131,33 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.IMAGE_NAME }}:latest
           
   deploy:
     name: Deploy to Minikube
     runs-on: self-hosted
-    needs: docker-build-and-push # Solo despliega si la imagen se subió a Docker Hub
-
+    needs: docker-build-and-push
+    
+    env:
+      IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/devsu-demo-java
+      IMAGE_TAG: ${{ github.sha }}
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      # ── Preparar los manifiestos con la imagen correcta ──
-      - name: Update Image in Manifest
+    
+      - name: Use Minikube context
+        run: kubectl config use-context minikube
+    
+      - name: Apply base manifests
+        run: kubectl apply -f k8s/manifests.yaml
+    
+      - name: Set deployment image
         run: |
-          sed -i "s|\${{ secrets.DOCKERHUB_USERNAME }}|${{ secrets.DOCKERHUB_USERNAME }}|g" k8s/manifests.yaml
-
-      # ── Despliegue en Minikube ──
-      - name: Apply Kubernetes Manifests
-        run: |
-          # Asegurarse de que el runner use el contexto de Minikube
-          kubectl config use-context minikube
-          
-          # Aplicar manifiestos
-          kubectl apply -f k8s/manifests.yaml
-          
-          # Forzar reinicio para descargar la nueva imagen (rolling update)
-          kubectl rollout restart deployment/devsu-demo-app
-          
-          # Esperar a que el despliegue sea exitoso
-          kubectl rollout status deployment/devsu-demo-app --timeout=90s
+          kubectl set image deployment/devsu-demo-app \
+            devsu-demo=${IMAGE_NAME}:${IMAGE_TAG}
+    
+      - name: Wait for rollout
+        run: kubectl rollout status deployment/devsu-demo-app --timeout=180s
