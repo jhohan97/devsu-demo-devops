@@ -16,7 +16,7 @@ jobs:
   # ─────────────────────────────────────────
   build-and-test:
     name: Build, Test & Analyze
-    runs-on: LA-MAQUINA
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
